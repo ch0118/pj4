@@ -72,15 +72,39 @@
 ;   to an equivalent (when converted back via each church->XYZ) expression in the output language (defined above)
 (define (churchify e)
   (match e
-         [_ 'todo]))
+         [(? number? n) (church-num n)]
+         ['#t (church-true)]
+         ['#f (church-false)]
+         ['() (lambda (cons null) (null '()))] ; represents an empty list
+         [(? symbol? x) x] ; variable reference
+         [`(lambda (,x) ,body) `(lambda (,x) ,(churchify body))] ; lambda abstraction
+         [`(if ,cond ,then ,else) `(,(churchify cond) ,(churchify then) ,(churchify else))]
+         [`(,op ,a ,b) (match op ; binary operations
+                           ['+ `(lambda (f x) (,((churchify a) f) ((churchify b) f x)))]
+                           ['* `(lambda (f x) (,((churchify a) ((churchify b) f)) x))])]
+         [`(,op ,arg) (match op ; unary operations
+                           ['add1 `(lambda (f x) (f (,(churchify arg) f x)))]
+                           ['zero? `(,(churchify arg) (lambda (x) #f) (lambda (_) #t))])]
+         [`(let ([,x ,v]) ,body) `(,(churchify `(lambda (,x) ,body)) ,(churchify v))]
+         [`(letrec ([,x ,(list 'lambda (list x) body)]) ,in-body)
+          `(lambda (,x) ,(churchify in-body)) ((lambda (rec) (lambda (,x) ,(churchify body))) (lambda (x) x)))]
+         [`(,fun ,arg) `(,(churchify fun) ,(churchify arg))]
+         [else (error "Unsupported expression type" e)]))
 
 ; Takes a whole program in the input language, and converts it into an equivalent program in lambda-calc
 (define (church-compile program)
   ; Define primitive operations and needed helpers using a top-level let form?
-  (define todo `(lambda (x) x))
+  (define (church-add1)
+    `(lambda (n) (lambda (f) (lambda (x) ((n f) (f x))))))
+  (define (church-add)
+    `(lambda (m) (lambda (n) (lambda (f) (lambda (x) ((m f) ((n f) x)))))))
+  (define (church-mult)
+    `(lambda (m) (lambda (n) (lambda (f) (m (n f))))))
+  (define (church-zero?)
+    `(lambda (n) (n (lambda (x) ,church-false) ,church-true)))
   (churchify
-   `(let ([add1 ,todo]
-          [+ ,todo]
-          [* ,todo]
-          [zero? ,todo])
+   `(let ([add1 ,church-add1]
+          [zero? ,church-zero?]
+          [+ ,church-add]
+          [* ,church-mult])
       ,program)))
